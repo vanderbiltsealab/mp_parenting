@@ -5,4 +5,4 @@ Data and analysis scripts for the manuscript: Parents’ perceptions of young ch
 This repository includes:
 
 - A .csv files containing the raw data used in this study
-- The R markdown file used to produce the results presented in DOI
+- The R markdown file used to produce the results presented in 10.31219/osf.io/8uzxn
