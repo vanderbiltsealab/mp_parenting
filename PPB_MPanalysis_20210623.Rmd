@@ -1,0 +1,485 @@
+---
+title: "Analysis for: Parents’ perceptions of young children’s minds are associated with their interest in and behaviour toward their own child "
+author: "Virginia C. Salo"
+output: html_document
+---
+
+# Read in data
+```{r}
+
+library(tidyverse)
+library(patchwork)
+library(pastecs)
+library(mediation)
+library(e1071)
+library(lmtest)
+library(sandwich)
+library(lavaan)
+library(lavaan.survey)
+
+options(scipen = 999, digits = 3)
+
+PPBMP <-
+  read.csv(
+    "~/Dropbox/Research/Vanderbilt/Mind Perception/PPB Mind Perception/MPPPBData_20210611.csv"
+  ) %>%
+  mutate(
+    Zprfq_total = scale(prfq_total),
+    Zmp_total = scale(mp_total),
+    Zmp_negaff = scale(mp_negaff),
+    Zmp_cogcon = scale(mp_cogcon),
+    Zmp_bodsen = scale(mp_bodsen),
+    Zmp_soccon = scale(mp_soccon),
+    Zpospar_total = scale(pospar_total)
+  )
+
+```
+
+# Demographics
+```{r}
+
+stat.desc(PPBMP$parent_age) 
+stat.desc(PPBMP$child_age_months) 
+
+Race <- PPBMP %>%
+  mutate(Site = 1) %>%
+  group_by(Site) %>%     
+  count(Site, parent_race_txt) %>%
+  mutate(prop = prop.table(n))
+
+Ethnicity <- PPBMP %>%
+  mutate(Site = 1) %>%
+  group_by(Site) %>%     
+  count(Site, parent_latinx_txt) %>%
+  mutate(prop = prop.table(n))
+
+Female <- PPBMP %>%
+  mutate(Site = 1) %>%
+  group_by(Site) %>%        
+  count(Site, parent_female) %>%
+  mutate(prop = prop.table(n))
+
+Education <- PPBMP %>%
+  mutate(Site = 1) %>%
+  group_by(Site) %>%     
+  count(Site, parent_education_txt) %>%
+  mutate(prop = prop.table(n))
+
+MaritalStatus <- PPBMP %>%
+  mutate(Site = 1) %>%
+  group_by(Site) %>%        
+  count(Site, marital_status_txt) %>%
+  mutate(prop = prop.table(n))
+
+EmployStatus <- PPBMP %>%
+  mutate(Site = 1) %>%
+  group_by(Site) %>%       
+  count(Site, employment_status_txt) %>%
+  mutate(prop = prop.table(n))
+
+Income <- PPBMP %>%
+  mutate(Site = 1) %>%
+  group_by(Site) %>%        
+  count(Site, annual_income_txt) %>%
+  mutate(prop = prop.table(n))
+
+ChildInHome <- PPBMP %>%
+  mutate(Site = 1) %>%
+  group_by(Site) %>%        
+  count(Site, in_home_child) %>%
+  mutate(prop = prop.table(n))
+
+TotChildren <- PPBMP %>%
+  mutate(Site = 1) %>%
+  group_by(Site) %>%        
+  count(Site, current_num_children) %>%
+  mutate(prop = prop.table(n))
+
+Gender <- PPBMP %>%
+  dplyr::select(id,
+         family_id,
+         parent_female,
+         seriousrelationship,
+         bparentrelationship,
+         nonromantic_caregiver,
+         other_caregiver,
+         other_caregiver_txt,
+         marital_status,
+         marital_status_txt) %>%
+  arrange(family_id) %>%
+  mutate(parentnum = sequence(rle(as.character(family_id))$lengths)) %>%
+  dplyr::select(-id) %>%
+  pivot_wider(names_from = parentnum,
+              values_from = c(
+                parent_female,
+                seriousrelationship,
+                bparentrelationship,
+                nonromantic_caregiver,
+                other_caregiver,
+                other_caregiver_txt,
+                marital_status,
+                marital_status_txt)) %>%
+  mutate(samegender = case_when(parent_female_1 == 1 & parent_female_2 == 1 ~ 1,
+                                parent_female_1 == 0 & parent_female_2 == 0 ~ 1,
+                                parent_female_1 == 1 & parent_female_2 == 0 ~ 0,
+                                parent_female_1 == 0 & parent_female_2 == 1 ~ 0))
+
+TwoParent <- Gender %>%
+  filter(!is.na(parent_female_2))
+
+OneParent <- Gender %>%
+  filter(is.na(parent_female_2))
+
+
+```
+
+# Mind Perception item reliability
+```{r}
+
+PPBMP_mp <- PPBMP %>% 
+  select(
+    mp_1_v2:mp_20_v2
+  )
+psych::alpha(PPBMP_mp, check.keys = TRUE)
+
+PPBMP_mpNA <- PPBMP %>% 
+  select(
+    mp_18_v2, mp_4_v2, mp_10_v2, mp_1_v2, mp_5_v2
+  )
+psych::alpha(PPBMP_mpNA, check.keys = TRUE)
+
+PPBMP_mpCC <- PPBMP %>% 
+  select(
+    mp_13_v2, mp_19_v2, mp_8_v2, mp_2_v2, mp_9_v2
+  )
+psych::alpha(PPBMP_mpCC, check.keys = TRUE)
+
+PPBMP_mpBS <- PPBMP %>% 
+  select(
+    mp_15_v2, mp_12_v2, mp_7_v2, mp_11_v2, mp_14_v2
+  )
+psych::alpha(PPBMP_mpBS, check.keys = TRUE)
+
+PPBMP_mpSC <- PPBMP %>% 
+  select(
+    mp_20_v2, mp_16_v2, mp_3_v2, mp_6_v2, mp_17_v2
+  )
+psych::alpha(PPBMP_mpSC, check.keys = TRUE)
+
+
+
+```
+# PRFQ item reliability
+```{r}
+
+PPBMP_prfq <- PPBMP %>% 
+  select(
+    prfq_1a:prfq_1f
+  )
+psych::alpha(PPBMP_prfq, check.keys = TRUE)
+
+```
+
+# Parenting behavior item reliability
+```{r}
+
+PPBMP_pp <- PPBMP %>% 
+  select(
+    cogstim_1:cogstim_26,
+    paryc_1:paryc_11,
+    paryc_13,
+    paryc_14,
+    paryc_16
+  )
+psych::alpha(PPBMP_pp, check.keys = TRUE)
+
+```
+
+x<-mean(.365, .427, .456, .409, .434, .283, .454, .526, .221, .380, .322, .405, .405, .166, .498, .291, .144, .424, .335, .410, .391, .281, .286, .230, .315, .336, .440, .378, .378, .387, .359, .417, .360, .326, .380, .438, .391)
+
+# Descriptives
+```{r}
+
+stat.desc(PPBMP$prfq_total) 
+stat.desc(PPBMP$mp_total) 
+stat.desc(PPBMP$mp_negaff)
+stat.desc(PPBMP$mp_cogcon) 
+stat.desc(PPBMP$mp_bodsen)
+stat.desc(PPBMP$mp_soccon) 
+stat.desc(PPBMP$pospar_total)
+
+```
+
+
+# Linear regressions with CR-SEs
+```{r}
+
+ca1 <- lm(Zmp_total ~ child_age_months, data=PPBMP)
+ca1ct <- coeftest(ca1, vcov = vcovCL, cluster = ~ family_id)
+ca1ct
+confint(ca1ct)
+
+ca2 <- lm(Zprfq_total ~ child_age_months, data=PPBMP)
+ca2ct <- coeftest(ca2, vcov = vcovCL, cluster = ~ family_id)
+ca2ct
+confint(ca2ct)
+
+ca3 <- lm(Zpospar_total ~ child_age_months, data=PPBMP)
+ca3ct <- coeftest(ca3, vcov = vcovCL, cluster = ~ family_id)
+ca3ct
+confint(ca3ct)
+
+lm1 <- lm(Zprfq_total ~ Zmp_total + child_age_months, data=PPBMP)
+ct1 <- coeftest(lm1, vcov = vcovCL, cluster = ~ family_id)
+ct1
+confint(ct1)
+
+lm6 <- lm(Zpospar_total ~ Zmp_total + child_age_months, data=PPBMP)
+ct6 <- coeftest(lm6, vcov = vcovCL, cluster = ~ family_id)
+ct6
+confint(ct6)
+
+lm11 <- lm(Zpospar_total ~ Zprfq_total + child_age_months, data=PPBMP)
+ct11 <- coeftest(lm11, vcov = vcovCL, cluster = ~ family_id)
+ct11
+confint(ct11)
+
+```
+
+# Scatterplots
+```{r}
+
+theme_ppb <- theme(
+  panel.background = element_rect(fill = "white"),
+  axis.title = element_text(
+    family = "Arial",
+    size = 8,
+    color = "black"
+  ),
+  axis.line = element_line(size = .5, colour = "black"),
+  axis.text = element_text(
+    family = "Arial",
+    size = 6,
+    color = "black"
+  ),
+  aspect.ratio = 1
+)
+
+lm1plot <- PPBMP %>%
+  ggplot(aes(x = Zmp_total, y = Zprfq_total)) +
+  geom_point(color = "gray33", shape = 21, size = 2) +
+  geom_smooth(method = lm, color = "black") +
+  labs(x = "Mind Perception of\nPreschool-Aged Children", y = "Interest and Curiosity in\nOwn Child's Mind") +
+  theme_ppb
+
+lm6plot <- PPBMP %>%
+  ggplot(aes(x = Zmp_total, y = Zpospar_total)) +
+  geom_point(color = "gray33", shape = 21, size = 2) +
+  geom_smooth(method = lm, color = "black") +
+  labs(x = "Mind Perception of\nPreschool-Aged Children", y = "Positive Parenting Behaviors") +
+  theme_ppb
+
+lm11plot <- PPBMP %>%
+  ggplot(aes(x = Zprfq_total, y = Zpospar_total)) +
+  geom_point(color = "gray33", shape = 21, size = 2) +
+  geom_smooth(method = lm, color = "black") +
+  labs(x = "Interest and Curiosity in\nOwn Child's Mind", y = "Positive Parenting Behaviors") +
+  theme_ppb
+
+scatters <- lm1plot + lm6plot + lm11plot
+scatters
+
+ggsave("Figure_1.png",
+       plot = scatters,
+       dpi = 300)
+
+```
+
+#MEDIATION MODEL
+```{r}
+
+child_age_months <- PPBMP %>%
+  dplyr::select(child_age_months)
+
+med1 <- lm(Zpospar_total ~ Zmp_total + Zprfq_total + child_age_months, data = PPBMP)
+ctmed1 <- coeftest(med1, vcov = vcovCL, cluster = ~ family_id)
+ctmed1
+confint(ctmed1)
+
+ppb.med1 <-
+  (mediate(
+    lm1,
+    med1,
+    treat = "Zmp_total",
+    mediator = "Zprfq_total",
+    covariates = list(child_age_months),
+#    robutstSE = TRUE,
+    cluster = PPBMP$family_id,
+    sims = 100
+  ))
+summary(ppb.med1)
+
+```
+
+# Subscales regressions
+```{r}
+
+lm2 <- lm(Zprfq_total ~ Zmp_negaff + child_age_months, data=PPBMP)
+ct2 <- coeftest(lm2, vcov = vcovCL, cluster = ~ family_id)
+ct2
+confint(ct2)
+
+lm3 <- lm(Zprfq_total ~ Zmp_cogcon + child_age_months, data=PPBMP)
+ct3 <- coeftest(lm3, vcov = vcovCL, cluster = ~ family_id)
+ct3
+confint(ct3)
+
+lm4 <- lm(Zprfq_total ~ Zmp_bodsen + child_age_months, data=PPBMP)
+ct4 <- coeftest(lm4, vcov = vcovCL, cluster = ~ family_id)
+ct4
+confint(ct4)
+
+lm5 <- lm(Zprfq_total ~ Zmp_soccon + child_age_months, data=PPBMP)
+ct5 <- coeftest(lm5, vcov = vcovCL, cluster = ~ family_id)
+ct5
+confint(ct5)
+
+lm7 <- lm(Zpospar_total ~ Zmp_negaff + child_age_months, data=PPBMP)
+ct7 <- coeftest(lm7, vcov = vcovCL, cluster = ~ family_id)
+ct7
+confint(ct7)
+
+lm8 <- lm(Zpospar_total ~ Zmp_cogcon + child_age_months, data=PPBMP)
+ct8 <- coeftest(lm8, vcov = vcovCL, cluster = ~ family_id)
+ct8
+confint(ct8)
+
+lm9 <- lm(Zpospar_total ~ Zmp_bodsen + child_age_months, data=PPBMP)
+ct9 <- coeftest(lm9, vcov = vcovCL, cluster = ~ family_id)
+ct9
+confint(ct9)
+
+lm10 <- lm(Zpospar_total ~ Zmp_soccon + child_age_months, data=PPBMP)
+ct10 <- coeftest(lm10, vcov = vcovCL, cluster = ~ family_id)
+ct10
+confint(ct10)
+
+```
+
+
+# Subscale mediation
+``` {r}
+
+med3 <- lm(Zpospar_total ~ Zmp_cogcon + Zprfq_total + child_age_months, data = PPBMP)
+ctmed3 <- coeftest(med3, vcov = vcovCL, cluster = ~ family_id)
+ctmed3
+confint(ctmed3)
+
+ppb.med3 <-
+  (mediate(
+    lm3,
+    med3,
+    treat = "Zmp_cogcon",
+    mediator = "Zprfq_total",
+    covariates = list(child_age_months),
+    #    robutstSE = TRUE,
+    cluster = PPBMP$family_id,
+    sims = 100
+  ))
+summary(ppb.med3)
+
+med5 <- lm(Zpospar_total ~ Zmp_soccon + Zprfq_total + child_age_months, data = PPBMP)
+ctmed5 <- coeftest(med5, vcov = vcovCL, cluster = ~ family_id)
+ctmed5
+confint(ctmed5)
+
+ppb.med5 <-
+  (mediate(
+    lm5,
+    med5,
+    treat = "Zmp_soccon",
+    mediator = "Zprfq_total",
+    covariates = list(child_age_months),
+    #    robutstSE = TRUE,
+    cluster = PPBMP$family_id,
+    sims = 100
+  ))
+summary(ppb.med5)
+
+```
+
+#Parent Gender analysis
+#regression
+````{r}
+
+lmg2 <- lm(Zmp_total ~ parent_female + child_age_months, data=PPBMP)
+ctg2 <- coeftest(lmg2, vcov = vcovCL, cluster = ~ family_id)
+ctg2
+confint(ctg2)
+
+lmg2na <- lm(Zmp_negaff ~ parent_female + child_age_months, data=PPBMP)
+ctg2na <- coeftest(lmg2na, vcov = vcovCL, cluster = ~ family_id)
+ctg2na
+confint(ctg2na)
+
+lmg2cc <- lm(Zmp_cogcon ~ parent_female + child_age_months, data=PPBMP)
+ctg2cc <- coeftest(lmg2cc, vcov = vcovCL, cluster = ~ family_id)
+ctg2cc
+confint(ctg2cc)
+
+lmg2bs <- lm(Zmp_bodsen ~ parent_female + child_age_months, data=PPBMP)
+ctg2bs <- coeftest(lmg2bs, vcov = vcovCL, cluster = ~ family_id)
+ctg2bs
+confint(ctg2bs)
+
+lmg2sc <- lm(Zmp_soccon ~ parent_female + child_age_months, data=PPBMP)
+ctg2sc <- coeftest(lmg2sc, vcov = vcovCL, cluster = ~ family_id)
+ctg2sc
+confint(ctg2sc)
+
+lmg3 <- lm(Zprfq_total ~ parent_female + child_age_months, data=PPBMP)
+ctg3 <- coeftest(lmg3, vcov = vcovCL, cluster = ~ family_id)
+ctg3
+confint(ctg3)
+
+lmg1 <- lm(Zpospar_total ~ parent_female + child_age_months, data=PPBMP)
+ctg1 <- coeftest(lmg1, vcov = vcovCL, cluster = ~ family_id)
+ctg1
+confint(ctg1)
+
+```
+
+#Serial mediation
+```{r}
+
+modelA1 <- '
+Zmp_total ~ a*parent_female  + child_age_months
+Zprfq_total ~ b*Zmp_total + parent_female  + child_age_months
+Zpospar_total ~ c*Zprfq_total + Zmp_total + d*parent_female  + child_age_months
+#Defined Parameters:
+ie := a*b*c
+de := d'
+
+modelA1fit <- sem(modelA1, data=PPBMP)
+clustered_STS <- svydesign(ids = ~family_id , data = PPBMP) 
+fit.path <- lavaan.survey(modelA1fit, survey.design = clustered_STS)
+summary(fit.path, ci=TRUE, standardized = TRUE)
+
+```
+
+```{r}
+
+modelA2 <- '
+Zmp_negaff ~ a*parent_female  + child_age_months
+Zprfq_total ~ b*Zmp_negaff + parent_female  + child_age_months
+Zpospar_total ~ c*Zprfq_total + Zmp_negaff + d*parent_female  + child_age_months
+#Defined Parameters:
+ie := a*b*c
+de := d'
+
+modelA2fit <- sem(modelA2, data=PPBMP)
+clustered_STS <- svydesign(ids = ~family_id , data = PPBMP) 
+fit.path2 <- lavaan.survey(modelA2fit, survey.design = clustered_STS)
+summary(fit.path2, ci=TRUE, standardized = TRUE)
+
+```
